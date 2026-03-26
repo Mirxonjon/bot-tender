@@ -6,8 +6,16 @@ const tenderSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    source: {
+        type: String,
+        required: true
+    },
     title: {
         type: String
+    },
+    isMatched: {
+        type: Boolean,
+        default: false
     },
     processedAt: {
         type: Date,

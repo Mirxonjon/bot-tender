@@ -1,14 +1,21 @@
-const axios = require('axios');
-const OpenAI = require('openai');
-const Tender = require('../model/tender');
-const { getBot } = require('../bot/bot');
+const axios = require("axios");
+const OpenAI = require("openai");
+const Tender = require("../model/tender");
+const { getBot } = require("../bot/bot");
 
 // Setup OpenAI
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-const TENDER_API_URL = 'https://tender.asia/api/tenders/?limit=50&offset=0&status=open&page_refreshed=True'; // Reduced limit for cron efficiency, or page logic can be added later
+const TENDER_ASIA_API_URL =
+  "https://tender.asia/api/tenders/?limit=99999&offset=0&status=open&page_refreshed=True";
+
+const UZEX_TRADELIST_API_URL =
+  "https://apietender.uzex.uz/api/common/TradeList";
+
+const TENDER_ASIA_SOURCE = "Tender Asia";
+const UZEX_SOURCE = "UzEx";
 
 const SYSTEM_PROMPT = `You are an expert procurement classifier.
 
@@ -57,108 +64,229 @@ Return JSON only in this format:
   "reason": "short explanation in Uzbek"
 }`;
 
-const analyzeTenders = async () => {
-    try {
-        console.log('Fetching tenders from API...');
-        const response = await axios.get(TENDER_API_URL);
-        const tenders = response.data.results || response.data.data || response.data || []; // Depending on API response structure
-        // The example shows a direct array inside or similar. the URL has `?limit=9999` so it might return an array of objects.
-
-        const dataArray = Array.isArray(tenders) ? tenders : [];
-
-        for (const item of dataArray) {
-            if (!item || !item.id) continue;
-
-            const existing = await Tender.findOne({ tenderId: item.id.toString() });
-            if (existing) {
-                // Already processed
-                continue;
-            }
-
-            // Prepare prompt content
-            const promptContent = `Lot:\nName: ${item.name}\nDescription: ${item.description || ''}`;
-
-            console.log(`Analyzing tender: ${item.id} - ${item.name}`);
-
-            const completion = await openai.chat.completions.create({
-                model: "gpt-4o-mini", // Using a fast, modern model
-                messages: [
-                    { role: "system", content: SYSTEM_PROMPT },
-                    { role: "user", content: promptContent }
-                ],
-                response_format: { type: "json_object" }
-            });
-
-            const replyText = completion.choices[0].message.content;
-            let analysis;
-            try {
-                analysis = JSON.parse(replyText);
-            } catch (e) {
-                console.error('Failed to parse OpenAI response:', replyText);
-                continue;
-            }
-
-            if (analysis.result === "MATCH") {
-                await notifyGroup(item, analysis);
-            }
-
-            // Save to DB so we don't process it again
-            await Tender.create({ tenderId: item.id.toString(), title: item.name });
-
-            // wait a little bit between OpenAI calls to prevent rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-    } catch (err) {
-        console.error('Error analyzing tenders:', err.message);
-    }
+const extractTenderAsiaItems = (raw) => {
+  // Tender Asia response shape varies; try the most common paths first.
+  if (Array.isArray(raw?.tenders?.data)) return raw.tenders.data;
+  if (Array.isArray(raw?.results?.tenders?.data))
+    return raw.results.tenders.data;
+  if (Array.isArray(raw?.results)) return raw.results;
+  if (Array.isArray(raw?.data)) return raw.data;
+  return [];
 };
 
-const notifyGroup = async (item, analysis) => {
-    const groupId = process.env.GROUP_ID;
-    const bot = getBot();
+const normalizeTenderAsiaItem = (item) => ({
+  source: TENDER_ASIA_SOURCE,
+  id: item.id,
+  name: item.name,
+  description: item.description || "",
+  price: item.price,
+  currency: item.currency || "UZS",
+  company: item.company,
+  region: item.region,
+  url: item.url,
+  lots: item.lots,
+});
 
-    if (!groupId || !bot) {
-        console.warn('Cannot send notification: GROUP_ID or bot instance missing.');
-        return;
+const fetchTenderAsia = async () => {
+  const response = await axios.get(TENDER_ASIA_API_URL);
+  const items = extractTenderAsiaItems(response.data);
+  return items.map(normalizeTenderAsiaItem);
+};
+
+const normalizeUzExItem = (item) => ({
+  source: UZEX_SOURCE,
+  id: item.id,
+  displayNo: item.display_no,
+  name: item.name,
+  // UzEx TradeList doesn't always include a separate "description" field,
+  // so we synthesize it from metadata (keep it concise; meta details go into the prompt).
+  description: [
+    `Start date: ${item.start_date || ""}`.trim(),
+    `End date: ${item.end_date || ""}`.trim(),
+    `Clarific date: ${item.clarific_date || ""}`.trim(),
+    `Total count: ${item.total_count ?? ""}`.trim(),
+    `Cost: ${item.cost ?? ""}`.trim(),
+    `Currency: ${item.currency_codeabc || item.currency || ""}`.trim(),
+    `Category name: ${item.category_name || ""}`.trim(),
+  ]
+    .filter((s) => s && s !== "Category name:".trim())
+    .join("\n"),
+  price: item.cost,
+  currency: item.currency_codeabc || "UZS",
+  company: item.seller_name,
+  sellerTin: item.seller_tin,
+  region: [item.region_name, item.district_name].filter(Boolean).join(" - "),
+  url: null,
+  lots: null,
+});
+
+const fetchUzExTradeList = async () => {
+  const requestBodyBase = { From: 0, To: 99999, System_Id: 0 };
+
+  // UzEx expects two TypeId values (2 and 1).
+  const typeIds = [2, 1];
+
+  const all = [];
+  for (const typeId of typeIds) {
+    const response = await axios.post(UZEX_TRADELIST_API_URL, {
+      ...requestBodyBase,
+      TypeId: typeId,
+    });
+    if (Array.isArray(response.data)) {
+      all.push(...response.data);
     }
+  }
 
-    const price = item.price ? new Intl.NumberFormat('uz-UZ').format(item.price) : 'Noma\'lum';
-    const currency = item.currency || 'UZS';
+  return all.map(normalizeUzExItem);
+};
 
-    let lotDetails = '';
-    if (item.lots && item.lots.length > 0) {
-        lotDetails = '\\n📦 *Lotlar hajmi va narxi:*\\n';
-        item.lots.forEach(lot => {
-            lotDetails += `- ${lot.name.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}: ${new Intl.NumberFormat('uz-UZ').format(lot.price)} ${lot.currency || 'UZS'}\\n`;
-        });
+const analyzeTenders = async () => {
+  try {
+    console.log("Fetching tenders from sources...");
+
+    const [tenderAsiaItems, uzexItems] = await Promise.all([
+      fetchTenderAsia().catch((err) => {
+        console.error("Tender Asia fetch failed:", err.message);
+        return [];
+      }),
+      fetchUzExTradeList().catch((err) => {
+        console.error("UzEx fetch failed:", err.message);
+        return [];
+      }),
+    ]);
+
+    const allItems = [...tenderAsiaItems, ...uzexItems];
+
+    for (const item of allItems) {
+      if (!item || !item.id || !item.name) continue;
+
+      const tenderKey = `${item.source}:${item.id.toString()}`;
+      // Backward compatibility: older records stored tenderId as just `id`.
+      const existing =
+        (await Tender.findOne({ tenderId: tenderKey })) ||
+        (item.source === TENDER_ASIA_SOURCE
+          ? await Tender.findOne({ tenderId: item.id.toString() })
+          : null);
+      if (existing) continue;
+
+      const promptContent = `Source: ${item.source}
+Lot:
+Name: ${item.name}
+Description:
+${item.description || ""}
+
+Meta:
+Company: ${item.company || ""}
+Seller TIN: ${item.sellerTin || ""}
+Region: ${item.region || ""}
+Display/ID: ${
+        item.source === UZEX_SOURCE ? item.displayNo || "" : item.id || ""
+      }`;
+
+      console.log(`Analyzing tender: ${item.source} ${item.id} - ${item.name}`);
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: promptContent },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const replyText = completion.choices[0].message.content;
+      let analysis;
+      try {
+        analysis = JSON.parse(replyText);
+      } catch (e) {
+        console.error("Failed to parse OpenAI response:", replyText);
+        continue;
+      }
+
+      const isMatched = analysis.result === "MATCH";
+      analysis.isMatched = isMatched; // keep for any future uses
+
+      await notifyGroup(item, analysis, isMatched);
+
+      await Tender.create({
+        tenderId: tenderKey,
+        source: item.source,
+        title: item.name,
+        isMatched,
+      });
+
+      // Small delay to avoid OpenAI rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+  } catch (err) {
+    console.error("Error analyzing tenders:", err.message);
+  }
+};
 
-    const message = `🚀 *Yangi Dasturlash (IT) Tenderi!*
+const notifyGroup = async (item, analysis, isMatched) => {
+  const groupId = isMatched
+    ? process.env.GROUP_ID_MATCH
+    : process.env.GROUP_ID_NOT_MATCH;
+  const bot = getBot();
 
-📌 *Nomi:* ${item.name ? item.name.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&') : "Noma'lum"}
-🏢 *Tashkilot:* ${item.company ? item.company.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&') : "Noma'lum"}
-📍 *Hudud:* ${item.region ? item.region.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&') : "Noma'lum"}
+  if (!groupId || !bot) {
+    console.warn("Cannot send notification: GROUP_ID or bot instance missing.");
+    return;
+  }
 
-💰 *Umumiy narx:* ${price} ${currency}
-${lotDetails}
-🔍 *AI Xulosasi:* ${analysis.reason.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')}
-🎯 *Ishonchlilik:* ${analysis.confidence}%
+  const price = item.price
+    ? new Intl.NumberFormat("uz-UZ").format(item.price)
+    : "Noma'lum";
+  const currency = item.currency || "UZS";
 
-🔗 [Tender havolasi](${item.url ? item.url : 'https://tender.mc.uz/'})`;
+  let lotDetails = "";
+  if (item.lots && item.lots.length > 0) {
+    lotDetails =
+      "\n📦 Lotlar hajmi va narxi:\n" +
+      item.lots
+        .map(
+          (lot) =>
+            `- ${lot.name}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${lot.currency || "UZS"}`
+        )
+        .join("\n");
+  }
 
-    try {
-        await bot.sendMessage(groupId, message, { parse_mode: 'MarkdownV2', disable_web_page_preview: true });
-        console.log(`Notification sent for tender ${item.id}`);
-    } catch (err) {
-        console.error(`Error sending message to group for tender ${item.id}:`, err.message);
-        // Fallback to normal text in case of markdown errors
-        try {
-            await bot.sendMessage(groupId, message.replace(/\*/g, '').replace(/_/g, '').replace(/\[/g, '').replace(/\]/g, '').replace(/\(/g, '').replace(/\)/g, ''));
-        } catch (e) {
-            console.error('Failed fallback send:', e.message);
-        }
-    }
+  const sourceLabel =
+    item.source === UZEX_SOURCE ? "UzEx" : "Tender Asia";
+  const tenderLink =
+    item.url ||
+    (item.source === UZEX_SOURCE && item.displayNo
+      ? `UzEx #${item.displayNo}`
+      : "Noma'lum");
+
+  const statusLine = `🎯 isMatched: ${
+    isMatched ? "true (MATCH)" : "false (NOT_MATCH)"
+  }\n`;
+
+  const message =
+    `${isMatched ? "🚀 MATCH lot!" : "🧩 NOT_MATCH lot!"}\n` +
+    `${item.name || "Noma'lum"}\n\n` +
+    `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
+    `📍 Hudud: ${item.region || "Noma'lum"}\n` +
+    `💰 Umumiy narx: ${price} ${currency}` +
+    `${lotDetails}\n\n` +
+    `🔍 Xulosasi: ${analysis.reason}\n\n` +
+    `🔗 Tender havolasi: ${tenderLink}\n` +
+    `🧾 Manba: ${sourceLabel}\n` +
+    `\n` +
+    statusLine;
+
+  try {
+    await bot.sendMessage(groupId, message, {
+      disable_web_page_preview: true,
+    });
+    console.log(`Notification sent for tender ${item.id}`);
+  } catch (err) {
+    console.error(
+      `Error sending message to group for tender ${item.id}:`,
+      err.message
+    );
+  }
 };
 
 module.exports = { analyzeTenders };
