@@ -259,22 +259,21 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `UzEx #${item.displayNo}`
       : "Noma'lum");
 
-  const statusLine = `🎯 isMatched: ${
-    isMatched ? "true (MATCH)" : "false (NOT_MATCH)"
-  }\n`;
-
-  const message =
-    `${isMatched ? "🚀 MATCH lot!" : "🧩 NOT_MATCH lot!"}\n` +
-    `${item.name || "Noma'lum"}\n\n` +
-    `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
-    `📍 Hudud: ${item.region || "Noma'lum"}\n` +
-    `💰 Umumiy narx: ${price} ${currency}` +
-    `${lotDetails}\n\n` +
-    `🔍 Xulosasi: ${analysis.reason}\n\n` +
-    `🔗 Tender havolasi: ${tenderLink}\n` +
-    `🧾 Manba: ${sourceLabel}\n` +
-    `\n` +
-    statusLine;
+  const message = isMatched
+    ? `🚀 MATCH lot!\n` +
+      `${item.name || "Noma'lum"}\n\n` +
+      `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
+      `📍 Hudud: ${item.region || "Noma'lum"}\n` +
+      `💰 Umumiy narx: ${price} ${currency}` +
+      `${lotDetails}\n\n` +
+      `🔍 Xulosasi: ${analysis.reason}\n\n` +
+      `🔗 Tender havolasi: ${tenderLink}\n` +
+      `🧾 Manba: ${sourceLabel}`
+    : `❌\n\n` +
+      `${item.name || "Noma'lum"}\n\n` +
+      `\`\`\`${analysis.reason || ""}\`\`\`\n\n` +
+      `💰 ${price} ${currency}\n\n` +
+      `🧾 Manba: ${sourceLabel}`;
 
   try {
     await bot.sendMessage(groupId, message, {
