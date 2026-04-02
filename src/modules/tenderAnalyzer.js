@@ -255,16 +255,15 @@ const notifyGroup = async (item, analysis, isMatched) => {
     item.source === UZEX_SOURCE ? "UzEx" : "Tender Asia";
   const tenderLink =
     item.url ||
-    (item.source === UZEX_SOURCE && item.displayNo
-      ? `UzEx #${item.displayNo}`
+    (item.source === UZEX_SOURCE && item.id
+      ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
-  const message = isMatched
-    ? `🚀 MATCH lot!\n` +
-      `${item.name || "Noma'lum"}\n\n` +
+  const message = true
+    ? `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
       `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
       `📍 Hudud: ${item.region || "Noma'lum"}\n` +
-      `💰 Umumiy narx: ${price} ${currency}` +
+      `💰 Umumiy narx: ${price} ${currency}\n` +
       `${lotDetails}\n\n` +
       `🔍 Xulosasi: ${analysis.reason}\n\n` +
       `🔗 Tender havolasi: ${tenderLink}\n` +
