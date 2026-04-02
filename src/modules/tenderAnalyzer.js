@@ -259,7 +259,7 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
-  const message = true
+  const message = isMatched
     ? `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
       `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
       `📍 Hudud: ${item.region || "Noma'lum"}\n` +
