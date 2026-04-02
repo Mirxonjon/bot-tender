@@ -270,14 +270,15 @@ const notifyGroup = async (item, analysis, isMatched) => {
       `🔗 Tender havolasi: ${tenderLink}\n` +
       `🧾 Manba: ${sourceLabel}`
     : `❌\n\n` +
-      `${item.name || "Noma'lum"}\n\n` +
-      `\`\`\`${analysis.reason || ""}\`\`\`\n\n` +
+      `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
+      `${(analysis.reason || "").trim()}\n\n` +
       `💰 ${price} ${currency}\n\n` +
       `🧾 Manba: ${sourceLabel}`;
 
   try {
     await bot.sendMessage(groupId, message, {
       disable_web_page_preview: true,
+      parse_mode: 'HTML'
     });
     console.log(`Notification sent for tender ${item.id}`);
   } catch (err) {
