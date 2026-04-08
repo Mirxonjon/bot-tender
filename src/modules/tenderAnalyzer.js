@@ -266,12 +266,13 @@ const notifyGroup = async (item, analysis, isMatched) => {
       `💰 Umumiy narx: ${price} ${currency}\n` +
       `${lotDetails}\n\n` +
       `🔍 Xulosasi: ${analysis.reason}\n\n` +
-      `🔗 Tender havolasi: ${tenderLink}\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
       `🧾 Manba: ${sourceLabel}`
     : `❌\n\n` +
       `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
       `${(analysis.reason || "").trim()}\n\n` +
       `💰 ${price} ${currency}\n\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
       `🧾 Manba: ${sourceLabel}`;
 
   try {
