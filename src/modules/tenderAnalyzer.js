@@ -31,15 +31,12 @@ Target Categories:
 - CRM / ERP / dashboard / admin panel development
 - frontend, backend, full-stack, API development or integration
 - database-driven systems
-- support, modernization, maintenance, or improvement of existing web systems
 - UI/UX design for web platforms
 - e-government or corporate information systems if they involve web/software development
 
 "🔥 Marketing bo'yicha" includes:
 - digital marketing, SMM (Social Media Marketing)
 - advertising services, PR campaigns
-- SEO optimization, targeted ads
-- branding, logo design, promotional materials
 - content creation for marketing
 
 "📞 Call center bo'yicha" includes:
@@ -52,7 +49,6 @@ NOT MATCHING includes:
 - electronics supply only, internet or hosting only, CCTV
 - vehicle services, legal/accounting services, printing services
 - physical equipment delivery
-- mobile app only, unless the lot clearly includes web platform development too
 
 Decision rules:
 1. If the lot clearly belongs to one of the target categories, return "MATCH" and provide the exact category name.
@@ -227,6 +223,15 @@ Display/ID: ${
   }
 };
 
+const escapeHtml = (text) => {
+  if (!text) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+};
+
 const notifyGroup = async (item, analysis, isMatched) => {
   const groupId = isMatched
     ? process.env.GROUP_ID_MATCH
@@ -250,7 +255,7 @@ const notifyGroup = async (item, analysis, isMatched) => {
       item.lots
         .map(
           (lot) =>
-            `- ${lot.name}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${lot.currency || "UZS"}`
+            `- ${escapeHtml(lot.name)}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${escapeHtml(lot.currency || "UZS")}`
         )
         .join("\n");
   }
@@ -263,24 +268,29 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
-  const categoryLine = analysis.category ? `📁 Kategoriya: <b>${analysis.category}</b>\n` : "";
+  const categoryLine = analysis.category ? `📁 Kategoriya: <b>${escapeHtml(analysis.category)}</b>\n` : "";
+
+  const itemName = escapeHtml(item.name || "Noma'lum");
+  const compName = escapeHtml(item.company || "Noma'lum");
+  const regionName = escapeHtml(item.region || "Noma'lum");
+  const reasonText = escapeHtml((analysis.reason || "").trim());
 
   const message = isMatched
-    ? `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
+    ? `<blockquote>${itemName}</blockquote>\n\n` +
       categoryLine +
-      `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
-      `📍 Hudud: ${item.region || "Noma'lum"}\n` +
-      `💰 Umumiy narx: ${price} ${currency}\n` +
+      `🏢 Tashkilot: ${compName}\n` +
+      `📍 Hudud: ${regionName}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n` +
       `${lotDetails}\n\n` +
-      `🔍 Xulosasi: ${analysis.reason}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
-      `🧾 Manba: ${sourceLabel}`
+      `🔍 Xulosasi: ${reasonText}\n\n` +
+      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}`
     : `❌\n\n` +
-      `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
-      `${(analysis.reason || "").trim()}\n\n` +
-      `💰 ${price} ${currency}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
-      `🧾 Manba: ${sourceLabel}`;
+      `<blockquote>${itemName}</blockquote>\n\n` +
+      `${reasonText}\n\n` +
+      `💰 ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
+      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}`;
 
   try {
     await bot.sendMessage(groupId, message, {
