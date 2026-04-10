@@ -17,10 +17,6 @@ const tenderSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    category: {
-        type: String,
-        default: null
-    },
     processedAt: {
         type: Date,
         default: Date.now

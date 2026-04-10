@@ -19,50 +19,47 @@ const UZEX_SOURCE = "UzEx";
 
 const SYSTEM_PROMPT = `You are an expert procurement classifier.
 
-Your task is to determine whether the given lot matches one of our target categories.
+Your task is to determine whether the given lot matches WEB DEVELOPMENT SERVICES.
 
-Target Categories:
-1. "🖥 IT bo'yicha" (Web & software development, CRM/ERP, UI/UX, database systems, API integration, etc.)
-2. "🔥 Marketing bo'yicha" (Marketing, SMM, advertising, PR, branding, SEO, promotional campaigns, etc.)
-3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, etc.)
-
-"🖥 IT bo'yicha" includes:
-- website development, web application development, portal development
+WEB DEVELOPMENT SERVICES includes:
+- website development
+- web application development
+- portal development
 - CRM / ERP / dashboard / admin panel development
-- frontend, backend, full-stack, API development or integration
+- frontend development
+- backend development
+- full-stack development
+- API development or integration
 - database-driven systems
 - support, modernization, maintenance, or improvement of existing web systems
 - UI/UX design for web platforms
 - e-government or corporate information systems if they involve web/software development
 
-"🔥 Marketing bo'yicha" includes:
-- digital marketing, SMM (Social Media Marketing)
-- advertising services, PR campaigns
-- SEO optimization, targeted ads
-- branding, logo design, promotional materials
-- content creation for marketing
-
-"📞 Call center bo'yicha" includes:
-- outbound and inbound call center services
-- customer support via phone
-- dispatching and telemarketing services
-
 NOT MATCHING includes:
-- security, cleaning, construction, repair, office supplies, furniture
-- electronics supply only, internet or hosting only, CCTV
-- vehicle services, legal/accounting services, printing services
+- security services
+- cleaning services
+- construction and repair
+- office supplies
+- furniture
+- electronics supply only
+- internet or hosting only
+- CCTV
+- vehicle services
+- legal/accounting services
+- printing services
 - physical equipment delivery
 - mobile app only, unless the lot clearly includes web platform development too
 
 Decision rules:
-1. If the lot clearly belongs to one of the target categories, return "MATCH" and provide the exact category name.
-2. Return "NOT_MATCH" if it is about physical goods, non-related services.
-3. Be strict. Do not guess positively without evidence.
+1. Return MATCH if the lot is clearly about creating, developing, updating, maintaining, or integrating a web-based software system.
+2. Return NOT_MATCH if it is about physical goods, non-IT services, or unrelated services.
+3. If the lot is about general software or IT services but web development is not clearly mentioned, return NOT_MATCH.
+4. If the lot mentions both software and hardware, choose MATCH only if web/software development is the main scope.
+5. Be strict. Do not guess positively without evidence.
 
 Return JSON only in this format:
 {
   "result": "MATCH" or "NOT_MATCH",
-  "category": "exact category string or null",
   "confidence": 0-100,
   "reason": "short explanation in Uzbek"
 }`;
@@ -216,7 +213,6 @@ Display/ID: ${
         source: item.source,
         title: item.name,
         isMatched,
-        category: analysis.category || null,
       });
 
       // Small delay to avoid OpenAI rate limiting
@@ -263,11 +259,8 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
-  const categoryLine = analysis.category ? `📁 Kategoriya: <b>${analysis.category}</b>\n` : "";
-
   const message = isMatched
     ? `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
-      categoryLine +
       `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
       `📍 Hudud: ${item.region || "Noma'lum"}\n` +
       `💰 Umumiy narx: ${price} ${currency}\n` +
