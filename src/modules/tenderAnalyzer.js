@@ -18,13 +18,12 @@ const TENDER_ASIA_SOURCE = "Tender Asia";
 const UZEX_SOURCE = "UzEx";
 
 const SYSTEM_PROMPT = `You are an expert procurement classifier.
-
 Your task is to determine whether the given lot matches one of our target categories.
 
 Target Categories:
-1. "🖥 IT bo'yicha" (Web & software development, CRM/ERP, UI/UX, database systems, API integration, etc.)
-2. "🔥 Marketing bo'yicha" (Marketing, SMM, advertising, PR, branding, SEO, promotional campaigns, etc.)
-3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, etc.)
+1. "🖥 IT bo'yicha" (Web & software development, mobile development, CRM/ERP, UI/UX, database systems, API integration, etc.)
+2. "🔥 Marketing bo'yicha" (Digital marketing, SMM.)
+3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, autodialer, etc.)
 
 "🖥 IT bo'yicha" includes:
 - website development, web application development, portal development
@@ -32,17 +31,17 @@ Target Categories:
 - frontend, backend, full-stack, API development or integration
 - database-driven systems
 - UI/UX design for web platforms
+- mobile development
 - e-government or corporate information systems if they involve web/software development
 
 "🔥 Marketing bo'yicha" includes:
 - digital marketing, SMM (Social Media Marketing)
-- advertising services, PR campaigns
-- content creation for marketing
 
 "📞 Call center bo'yicha" includes:
 - outbound and inbound call center services
 - customer support via phone
 - dispatching and telemarketing services
+- autodialer
 
 NOT MATCHING includes:
 - security, cleaning, construction, repair, office supplies, furniture
