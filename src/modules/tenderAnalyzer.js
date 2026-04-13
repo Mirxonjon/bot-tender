@@ -22,7 +22,7 @@ Your task is to determine whether the given lot matches one of our target catego
 
 Target Categories:
 1. "🖥 IT bo'yicha" (Web & software development, mobile development, CRM/ERP, UI/UX, database systems, API integration, etc.)
-2. "🔥 Marketing bo'yicha" (Digital marketing, SMM.)
+2. "🔥 Marketing bo'yicha" (SMM, short videos for social media, social network content and management)
 3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, autodialer, etc.)
 
 "🖥 IT bo'yicha" includes:
@@ -35,7 +35,10 @@ Target Categories:
 - e-government or corporate information systems if they involve web/software development
 
 "🔥 Marketing bo'yicha" includes:
-- digital marketing, SMM (Social Media Marketing)
+- SMM (Social Media Marketing)
+- shooting short videos for social networks (reels, tiktok, shorts)
+- content creation and managing social media accounts
+- Note: DO NOT match general advertising, printing, or design services ("рекламно-оформительские услуги", "реклама", "dizayn") unless they are specifically about SMM, digital content, or social networks.
 
 "📞 Call center bo'yicha" includes:
 - outbound and inbound call center services
@@ -46,8 +49,9 @@ Target Categories:
 NOT MATCHING includes:
 - security, cleaning, construction, repair, office supplies, furniture
 - electronics supply only, internet or hosting only, CCTV
-- vehicle services, legal/accounting services, printing services
+- vehicle services, legal/accounting services, printing services, banners, general advertising
 - physical equipment delivery
+- "рекламно-оформительские услуги" (general advertising services), unless specifically for digital/SMM
 
 Decision rules:
 1. If the lot clearly belongs to one of the target categories, return "MATCH" and provide the exact category name.
