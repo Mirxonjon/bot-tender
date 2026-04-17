@@ -18,37 +18,43 @@ const TENDER_ASIA_SOURCE = "Tender Asia";
 const UZEX_SOURCE = "UzEx";
 
 const SYSTEM_PROMPT = `You are an expert procurement classifier.
+Your task is to determine whether the given lot matches one of our target categories.
 
-Your task is to determine whether the given lot matches WEB DEVELOPMENT SERVICES.
+Target Categories:
+1. "🖥 IT bo'yicha" (Web & software development, mobile development, CRM/ERP, UI/UX, database systems, API integration, etc.)
+2. "🔥 Marketing bo'yicha" (SMM, short videos for social media, social network content and management)
+3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, autodialer, etc.)
 
-WEB DEVELOPMENT SERVICES includes:
-- website development
-- web application development
-- portal development
+"🖥 IT bo'yicha" includes:
+- website development, web application development, portal development
 - CRM / ERP / dashboard / admin panel development
 - frontend development
 - backend development
 - full-stack development
 - API development or integration
 - database-driven systems
-- support, modernization, maintenance, or improvement of existing web systems
 - UI/UX design for web platforms
+- mobile development
 - e-government or corporate information systems if they involve web/software development
 
+"🔥 Marketing bo'yicha" includes:
+- SMM (Social Media Marketing)
+- shooting short videos for social networks (reels, tiktok, shorts)
+- content creation and managing social media accounts
+- Note: DO NOT match general advertising, printing, or design services ("рекламно-оформительские услуги", "реклама", "dizayn") unless they are specifically about SMM, digital content, or social networks.
+
+"📞 Call center bo'yicha" includes:
+- outbound and inbound call center services
+- customer support via phone
+- dispatching and telemarketing services
+- autodialer
+
 NOT MATCHING includes:
-- security services
-- cleaning services
-- construction and repair
-- office supplies
-- furniture
-- electronics supply only
-- internet or hosting only
-- CCTV
-- vehicle services
-- legal/accounting services
-- printing services
+- security, cleaning, construction, repair, office supplies, furniture
+- electronics supply only, internet or hosting only, CCTV
+- vehicle services, legal/accounting services, printing services, banners, general advertising
 - physical equipment delivery
-- mobile app only, unless the lot clearly includes web platform development too
+- "рекламно-оформительские услуги" (general advertising services), unless specifically for digital/SMM
 
 Decision rules:
 1. Return MATCH if the lot is clearly about creating, developing, updating, maintaining, or integrating a web-based software system.
@@ -223,6 +229,15 @@ Display/ID: ${
   }
 };
 
+const escapeHtml = (text) => {
+  if (!text) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+};
+
 const notifyGroup = async (item, analysis, isMatched) => {
   const groupId = isMatched
     ? process.env.GROUP_ID_MATCH
@@ -246,7 +261,7 @@ const notifyGroup = async (item, analysis, isMatched) => {
       item.lots
         .map(
           (lot) =>
-            `- ${lot.name}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${lot.currency || "UZS"}`
+            `- ${escapeHtml(lot.name)}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${escapeHtml(lot.currency || "UZS")}`
         )
         .join("\n");
   }
@@ -259,21 +274,29 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
+  const categoryLine = analysis.category ? `📁 Kategoriya: <b>${escapeHtml(analysis.category)}</b>\n` : "";
+
+  const itemName = escapeHtml(item.name || "Noma'lum");
+  const compName = escapeHtml(item.company || "Noma'lum");
+  const regionName = escapeHtml(item.region || "Noma'lum");
+  const reasonText = escapeHtml((analysis.reason || "").trim());
+
   const message = isMatched
-    ? `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
-      `🏢 Tashkilot: ${item.company || "Noma'lum"}\n` +
-      `📍 Hudud: ${item.region || "Noma'lum"}\n` +
-      `💰 Umumiy narx: ${price} ${currency}\n` +
+    ? `<blockquote>${itemName}</blockquote>\n\n` +
+      categoryLine +
+      `🏢 Tashkilot: ${compName}\n` +
+      `📍 Hudud: ${regionName}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n` +
       `${lotDetails}\n\n` +
-      `🔍 Xulosasi: ${analysis.reason}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
-      `🧾 Manba: ${sourceLabel}`
+      `🔍 Xulosasi: ${reasonText}\n\n` +
+      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}`
     : `❌\n\n` +
-      `<blockquote>${item.name || "Noma'lum"}</blockquote>\n\n` +
-      `${(analysis.reason || "").trim()}\n\n` +
-      `💰 ${price} ${currency}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${tenderLink}</a>\n\n` +
-      `🧾 Manba: ${sourceLabel}`;
+      `<blockquote>${itemName}</blockquote>\n\n` +
+      `${reasonText}\n\n` +
+      `💰 ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
+      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}`;
 
   try {
     await bot.sendMessage(groupId, message, {
