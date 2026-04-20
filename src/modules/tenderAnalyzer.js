@@ -238,6 +238,15 @@ const escapeHtml = (text) => {
     .replace(/"/g, "&quot;");
 };
 
+const sendTelegramMessage = async (bot, chatId, message, options = {}) => {
+  try {
+    await bot.sendMessage(chatId, message, options);
+    console.log(`Message sent to chat ${chatId} (thread: ${options.message_thread_id || 'general'})`);
+  } catch (err) {
+    console.error(`Error sending message to chat ${chatId}:`, err.message);
+  }
+};
+
 const notifyGroup = async (item, analysis, isMatched) => {
   const groupId = isMatched
     ? process.env.GROUP_ID_MATCH
@@ -289,26 +298,33 @@ const notifyGroup = async (item, analysis, isMatched) => {
       `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n` +
       `${lotDetails}\n\n` +
       `🔍 Xulosasi: ${reasonText}\n\n` +
-      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n\n` +
       `🧾 Manba: ${escapeHtml(sourceLabel)}`
     : `❌\n\n` +
       `<blockquote>${itemName}</blockquote>\n\n` +
       `${reasonText}\n\n` +
       `💰 ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
-      `🔗 Tender havolasi: <a href="${escapeHtml(tenderLink)}">${escapeHtml(tenderLink)}</a>\n\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n\n` +
       `🧾 Manba: ${escapeHtml(sourceLabel)}`;
 
-  try {
-    await bot.sendMessage(groupId, message, {
-      disable_web_page_preview: true,
-      parse_mode: 'HTML'
+  // 1) Oddiy guruhga jo'natish (GROUP_ID_MATCH yoki GROUP_ID_NOT_MATCH)
+  const baseOptions = {
+    disable_web_page_preview: true,
+    parse_mode: 'HTML',
+  };
+  await sendTelegramMessage(bot, groupId, message, baseOptions);
+
+  // 2) Topic guruhiga jo'natish (GROUP_ID_TOPICS, tegishli topicga)
+  const topicsGroupId = process.env.GROUP_ID_TOPICS;
+  const topicId = isMatched
+    ? process.env.TOPIC_ID_MATCH
+    : process.env.TOPIC_ID_NOT_MATCH;
+
+  if (topicsGroupId && topicId) {
+    await sendTelegramMessage(bot, topicsGroupId, message, {
+      ...baseOptions,
+      message_thread_id: parseInt(topicId, 10),
     });
-    console.log(`Notification sent for tender ${item.id}`);
-  } catch (err) {
-    console.error(
-      `Error sending message to group for tender ${item.id}:`,
-      err.message
-    );
   }
 };
 

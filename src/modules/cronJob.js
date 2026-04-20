@@ -3,7 +3,7 @@ const { analyzeTenders } = require('./tenderAnalyzer');
 
 const startCronJobs = () => {
     // Run every 10 minutes
-    cron.schedule('*/10 * * * *', async () => {
+    cron.schedule('*/1 * * * *', async () => {
         console.log('[CRON] Starting tender analysis job...');
         await analyzeTenders();
         console.log('[CRON] Tender analysis job completed.');
