@@ -66,6 +66,7 @@ Decision rules:
 Return JSON only in this format:
 {
   "result": "MATCH" or "NOT_MATCH",
+  "category": "exact category string or null",
   "confidence": 0-100,
   "reason": "short explanation in Uzbek"
 }`;
