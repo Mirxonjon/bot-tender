@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const mongoose = require('mongoose');
 const { initBot } = require('./src/bot/bot');
@@ -14,6 +14,11 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+    console.error('FATAL ERROR: MONGO_URI is missing in .env file! Please configure your .env file on the server.');
+    process.exit(1);
+}
 
 mongoose.connect(MONGO_URI)
     .then(() => {
