@@ -1,4 +1,4 @@
-require('dotenv').config({ quiet: true });
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const { initBot } = require('./src/bot/bot');
