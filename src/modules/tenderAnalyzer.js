@@ -103,7 +103,7 @@ const fetchUzExTradeList = async () => {
 function parseStage2Analysis(rawText) {
   if (!rawText) {
     return {
-      status: "🟢 ПОДХОДИТ",
+      status: "🟢 To'g'ri keladi",
       isMatched: true,
       score: null,
       decision: "Изучить подробнее",
@@ -112,36 +112,40 @@ function parseStage2Analysis(rawText) {
   }
 
   const text = rawText.trim();
-  let status = "🟢 ПОДХОДИТ";
+  let status = "🟢 To'g'ri keladi";
   let isMatched = true;
 
   // 1. Detect Status
   if (
+    text.includes("🔴 TO'G'RI KELMAYDI") ||
     text.includes("🔴 НЕ ПОДХОДИТ") ||
-    /2\.\s*НАСКОЛЬКО\s*ЛОТ\s*ПОДХОДИТ\s*НАМ\?[\s\S]{0,120}НЕ ПОДХОДИТ/i.test(text)
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:TO'G'RI KELMAYDI|НЕ ПОДХОДИТ)/i.test(text)
   ) {
-    status = "🔴 НЕ ПОДХОДИТ";
+    status = "🔴 To'g'ri kelmaydi";
     isMatched = false;
   } else if (
+    text.includes("🟡 QISMAN TO'G'RI KELADI") ||
     text.includes("🟡 ЧАСТИЧНО ПОДХОДИТ") ||
-    /2\.\s*НАСКОЛЬКО\s*ЛОТ\s*ПОДХОДИТ\s*НАМ\?[\s\S]{0,120}ЧАСТИЧНО/i.test(text)
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:QISMAN|ЧАСТИЧНО)/i.test(text)
   ) {
-    status = "🟡 ЧАСТИЧНО ПОДХОДИТ";
+    status = "🟡 Qisman to'g'ri keladi";
     isMatched = true;
   } else if (
+    text.includes("🟢 TO'G'RI KELADI") ||
     text.includes("🟢 ПОДХОДИТ") ||
-    /2\.\s*НАСКОЛЬКО\s*ЛОТ\s*ПОДХОДИТ\s*НАМ\?[\s\S]{0,120}ПОДХОДИТ/i.test(text)
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:TO'G'RI KELADI|ПОДХОДИТ)/i.test(text)
   ) {
-    status = "🟢 ПОДХОДИТ";
+    status = "🟢 To'g'ri keladi";
     isMatched = true;
   }
 
   // Double check Final Recommendation (Section 13)
   if (
-    /13\.\s*ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]{0,250}Не участвовать/i.test(text) &&
+    /(?:13\.\s*)?ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]{0,250}Не участвовать/i.test(text) &&
+    !text.includes("🟢 TO'G'RI KELADI") &&
     !text.includes("🟢 ПОДХОДИТ")
   ) {
-    status = "🔴 НЕ ПОДХОДИТ";
+    status = "🔴 To'g'ri kelmaydi";
     isMatched = false;
   }
 
@@ -320,11 +324,11 @@ ${parsedDocs.combinedText}
         // Files were non-text (drawings, video, images) or no files attached -> Fallback to Stage 1 match
         finalIsMatched = true; // since jsonMatched was true
         stage2Result = {
-          status: "🟢 ПОДХОДИТ (По метаданным JSON)",
+          status: "🟢 To'g'ri keladi (JSON metama'lumotlari bo'yicha)",
           isMatched: true,
           score: null,
           decision: "Изучить подробнее",
-          note: "Файлы ТЗ не содержат распознаваемого текста либо представлены в виде чертежей/медиа. Решение принято на основе анализа JSON.",
+          note: "Fayllarda o'qiladigan matn topilmadi yoki faqat rasm/media biriktirilgan. Qaror JSON tahlili asosida qabul qilindi.",
           rawText: null,
         };
         console.log(`[Stage 2 Fallback] No readable TZ text found. Using Stage 1 match (isMatched=true).`);
@@ -392,18 +396,6 @@ const notifyGroup = async (item, jsonAnalysis, isMatched, deepAnalysis = null) =
     : "Noma'lum";
   const currency = item.currency || "UZS";
 
-  let lotDetails = "";
-  if (item.lots && item.lots.length > 0) {
-    lotDetails =
-      "\n📦 Lotlar hajmi va narxi:\n" +
-      item.lots
-        .map(
-          (lot) =>
-            `- ${escapeHtml(lot.name)}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${escapeHtml(lot.currency || "UZS")}`
-        )
-        .join("\n");
-  }
-
   const sourceLabel =
     item.source === UZEX_SOURCE ? "UzEx" : "Tender Asia";
   const tenderLink =
@@ -423,37 +415,34 @@ const notifyGroup = async (item, jsonAnalysis, isMatched, deepAnalysis = null) =
   if (isMatched) {
     let statusHeader = "";
     if (deepAnalysis) {
-      const statusBadge = deepAnalysis.status || "🟢 ПОДХОДИТ";
-      const scoreBadge = deepAnalysis.score ? ` | 🏆 Score: <b>${deepAnalysis.score}/100</b>` : "";
+      const statusBadge = deepAnalysis.status || "🟢 To'g'ri keladi";
+      const scoreBadge = deepAnalysis.score ? ` | 🏆 Bahosi: <b>${deepAnalysis.score}/100</b>` : "";
       const decisionBadge = deepAnalysis.decision ? ` | 📌 <b>${escapeHtml(deepAnalysis.decision)}</b>` : "";
-      statusHeader = `🎯 Status: ${statusBadge}${scoreBadge}${decisionBadge}\n\n`;
+      statusHeader = `${statusBadge}${scoreBadge}${decisionBadge}\n\n`;
     }
 
     let accordionDetails = "";
     if (deepAnalysis && deepAnalysis.rawText) {
-      const recMatch = deepAnalysis.rawText.match(/13\.\s*ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]*$/i);
-      const descMatch = deepAnalysis.rawText.match(/1\.\s*КРАТКОЕ\s*ОПИСАНИЕ\s*ЛОТА\s*([\s\S]*?)(?=2\.\s*НАСКОЛЬКО|$)/i);
+      const recMatch = deepAnalysis.rawText.match(/(?:13\.\s*)?(ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]*)$/i);
+      const descMatch = deepAnalysis.rawText.match(/(?:1\.\s*)?КРАТКОЕ\s*ОПИСАНИЕ\s*ЛОТА\s*([\s\S]*?)(?=(?:2\.\s*)?НАСКОЛЬКО|$)/i);
 
       let descText = descMatch && descMatch[1] ? descMatch[1].trim() : "";
-      let recText = recMatch ? recMatch[0].trim() : "";
+      let recText = recMatch && recMatch[1] ? recMatch[1].trim() : (recMatch ? recMatch[0].trim() : "");
+      recText = recText.replace(/^13\.\s*/i, "").trim();
 
-      accordionDetails =
-        `<blockquote expandable>` +
-        (descText ? `📋 <b>Tavsif:</b>\n${escapeHtml(descText)}\n\n` : "") +
-        (recText ? `💡 <b>Presale tavsiyasi:</b>\n${escapeHtml(recText)}\n\n` : "") +
-        (reasonText ? `🔍 <b>JSON xulosasi:</b>\n${reasonText}` : "") +
-        `</blockquote>\n\n`;
+      const innerParts = [];
+      if (descText) {
+        innerParts.push(`📋 <b>Tavsif:</b>\n${escapeHtml(descText)}`);
+      }
+      if (recText) {
+        innerParts.push(`💡 <b>Xulosa:</b>\n${escapeHtml(recText)}`);
+      }
+
+      if (innerParts.length > 0) {
+        accordionDetails = `<blockquote expandable>${innerParts.join("\n\n")}</blockquote>\n\n`;
+      }
     } else if (deepAnalysis && deepAnalysis.note) {
-      accordionDetails =
-        `<blockquote expandable>` +
-        `ℹ️ <i>${escapeHtml(deepAnalysis.note)}</i>\n\n` +
-        (reasonText ? `🔍 <b>JSON xulosasi:</b>\n${reasonText}` : "") +
-        `</blockquote>\n\n`;
-    } else if (reasonText) {
-      accordionDetails =
-        `<blockquote expandable>` +
-        `🔍 <b>JSON xulosasi:</b>\n${reasonText}` +
-        `</blockquote>\n\n`;
+      accordionDetails = `<blockquote expandable>ℹ️ <i>${escapeHtml(deepAnalysis.note)}</i></blockquote>\n\n`;
     }
 
     message =
@@ -461,13 +450,11 @@ const notifyGroup = async (item, jsonAnalysis, isMatched, deepAnalysis = null) =
       categoryLine +
       `🏢 Tashkilot: ${compName}\n` +
       `📍 Hudud: ${regionName}\n` +
-      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n` +
-      (lotDetails ? `${lotDetails}\n` : "") +
-      `\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
       statusHeader +
       accordionDetails +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n` +
-      `🧾 Manba: ${escapeHtml(sourceLabel)}`;
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>`;
   } else {
     // NOT MATCHED
     message =
@@ -476,9 +463,11 @@ const notifyGroup = async (item, jsonAnalysis, isMatched, deepAnalysis = null) =
       `<blockquote expandable>` +
       `${reasonText}` +
       `</blockquote>\n\n` +
-      `💰 ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n\n` +
-      `🧾 Manba: ${escapeHtml(sourceLabel)}`;
+      `🏢 Tashkilot: ${compName}\n` +
+      `📍 Hudud: ${regionName}\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>`;
   }
 
   // 1) Send to main group
