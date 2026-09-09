@@ -2,6 +2,13 @@ const axios = require("axios");
 const OpenAI = require("openai");
 const Tender = require("../model/tender");
 const { getBot } = require("../bot/bot");
+const {
+  STAGE1_SYSTEM_PROMPT,
+  STAGE2_PRESALE_SYSTEM_PROMPT,
+} = require("./prompts");
+const { getLotFiles } = require("./fileExtractors/urlRouter");
+const { downloadFilesList } = require("./fileDownloader");
+const { parseDocuments } = require("./documentParser");
 
 // Setup OpenAI
 const openai = new OpenAI({
@@ -17,62 +24,7 @@ const UZEX_TRADELIST_API_URL =
 const TENDER_ASIA_SOURCE = "Tender Asia";
 const UZEX_SOURCE = "UzEx";
 
-const SYSTEM_PROMPT = `You are an expert procurement classifier.
-Your task is to determine whether the given lot matches one of our target categories.
-
-Target Categories:
-1. "🖥 IT bo'yicha" (Web & software development, mobile development, CRM/ERP, UI/UX, database systems, API integration, etc.)
-2. "🔥 Marketing bo'yicha" (SMM, short videos for social media, social network content and management)
-3. "📞 Call center bo'yicha" (Call center services, customer support, telemarketing, dispatching, autodialer, etc.)
-
-"🖥 IT bo'yicha" includes:
-- website development, web application development, portal development
-- CRM / ERP / dashboard / admin panel development
-- frontend development
-- backend development
-- full-stack development
-- API development or integration
-- database-driven systems
-- UI/UX design for web platforms
-- mobile development
-- e-government or corporate information systems if they involve web/software development
-
-"🔥 Marketing bo'yicha" includes:
-- SMM (Social Media Marketing)
-- shooting short videos for social networks (reels, tiktok, shorts)
-- content creation and managing social media accounts
-- Note: DO NOT match general advertising, printing, or design services ("рекламно-оформительские услуги", "реклама", "dizayn") unless they are specifically about SMM, digital content, or social networks.
-
-"📞 Call center bo'yicha" includes:
-- outbound and inbound call center services
-- customer support via phone
-- dispatching and telemarketing services
-- autodialer
-
-NOT MATCHING includes:
-- security, cleaning, construction, repair, office supplies, furniture
-- electronics supply only, internet or hosting only, CCTV
-- vehicle services, legal/accounting services, printing services, banners, general advertising
-- physical equipment delivery
-- "рекламно-оформительские услуги" (general advertising services), unless specifically for digital/SMM
-
-Decision rules:
-1. Return MATCH if the lot is clearly about creating, developing, updating, maintaining, or integrating a web-based software system.
-2. Return NOT_MATCH if it is about physical goods, non-IT services, or unrelated services.
-3. If the lot is about general software or IT services but web development is not clearly mentioned, return NOT_MATCH.
-4. If the lot mentions both software and hardware, choose MATCH only if web/software development is the main scope.
-5. Be strict. Do not guess positively without evidence.
-
-Return JSON only in this format:
-{
-  "result": "MATCH" or "NOT_MATCH",
-  "category": "exact category string or null",
-  "confidence": 0-100,
-  "reason": "short explanation in Uzbek"
-}`;
-
 const extractTenderAsiaItems = (raw) => {
-  // Tender Asia response shape varies; try the most common paths first.
   if (Array.isArray(raw?.tenders?.data)) return raw.tenders.data;
   if (Array.isArray(raw?.results?.tenders?.data))
     return raw.results.tenders.data;
@@ -105,8 +57,6 @@ const normalizeUzExItem = (item) => ({
   id: item.id,
   displayNo: item.display_no,
   name: item.name,
-  // UzEx TradeList doesn't always include a separate "description" field,
-  // so we synthesize it from metadata (keep it concise; meta details go into the prompt).
   description: [
     `Start date: ${item.start_date || ""}`.trim(),
     `End date: ${item.end_date || ""}`.trim(),
@@ -123,14 +73,12 @@ const normalizeUzExItem = (item) => ({
   company: item.seller_name,
   sellerTin: item.seller_tin,
   region: [item.region_name, item.district_name].filter(Boolean).join(" - "),
-  url: null,
+  url: item.id ? `https://etender.uzex.uz/lot/${item.id}` : null,
   lots: null,
 });
 
 const fetchUzExTradeList = async () => {
   const requestBodyBase = { From: 0, To: 99999, System_Id: 0 };
-
-  // UzEx expects two TypeId values (2 and 1).
   const typeIds = [2, 1];
 
   const all = [];
@@ -147,6 +95,88 @@ const fetchUzExTradeList = async () => {
   return all.map(normalizeUzExItem);
 };
 
+/**
+ * Parses the raw markdown/text output of Stage 2 Presale analysis
+ * @param {string} rawText 
+ * @returns {{status: string, isMatched: boolean, score: number|null, decision: string, rawText: string}}
+ */
+function parseStage2Analysis(rawText) {
+  if (!rawText) {
+    return {
+      status: "🟢 To'g'ri keladi",
+      isMatched: true,
+      score: null,
+      decision: "Изучить подробнее",
+      rawText: "",
+    };
+  }
+
+  const text = rawText.trim();
+  let status = "🟢 To'g'ri keladi";
+  let isMatched = true;
+
+  // 1. Detect Status
+  if (
+    text.includes("🔴 TO'G'RI KELMAYDI") ||
+    text.includes("🔴 НЕ ПОДХОДИТ") ||
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:TO'G'RI KELMAYDI|НЕ ПОДХОДИТ)/i.test(text)
+  ) {
+    status = "🔴 To'g'ri kelmaydi";
+    isMatched = false;
+  } else if (
+    text.includes("🟡 QISMAN TO'G'RI KELADI") ||
+    text.includes("🟡 ЧАСТИЧНО ПОДХОДИТ") ||
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:QISMAN|ЧАСТИЧНО)/i.test(text)
+  ) {
+    status = "🟡 Qisman to'g'ri keladi";
+    isMatched = true;
+  } else if (
+    text.includes("🟢 TO'G'RI KELADI") ||
+    text.includes("🟢 ПОДХОДИТ") ||
+    /2\.\s*НАСКОЛЬКО[\s\S]{0,120}(?:TO'G'RI KELADI|ПОДХОДИТ)/i.test(text)
+  ) {
+    status = "🟢 To'g'ri keladi";
+    isMatched = true;
+  }
+
+  // Double check Final Recommendation (Section 13)
+  if (
+    /(?:13\.\s*)?ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]{0,250}Не участвовать/i.test(text) &&
+    !text.includes("🟢 TO'G'RI KELADI") &&
+    !text.includes("🟢 ПОДХОДИТ")
+  ) {
+    status = "🔴 To'g'ri kelmaydi";
+    isMatched = false;
+  }
+
+  // 2. Extract Score
+  let score = null;
+  const scoreMatch = text.match(
+    /(?:ОБЩИЙ\s*SCORE|Общий\s*балл|Total\s*Score|Итоговый\s*балл)[\s:]*(\d{1,3})/i
+  );
+  if (scoreMatch) {
+    score = parseInt(scoreMatch[1], 10);
+  }
+
+  // 3. Extract Decision
+  let decision = "Участвовать";
+  const decisionMatch = text.match(/РЕШЕНИЕ[\s:]*([^\n\r.]+)/i);
+  if (decisionMatch) {
+    decision = decisionMatch[1].trim();
+  }
+
+  return {
+    status,
+    isMatched,
+    score,
+    decision,
+    rawText: text,
+  };
+}
+
+/**
+ * Main analysis pipeline: Stage 1 (JSON) -> Stage 2 (File TZ Presale Analysis)
+ */
 const analyzeTenders = async () => {
   try {
     console.log("Fetching tenders from sources...");
@@ -168,7 +198,6 @@ const analyzeTenders = async () => {
       if (!item || !item.id || !item.name) continue;
 
       const tenderKey = `${item.source}:${item.id.toString()}`;
-      // Backward compatibility: older records stored tenderId as just `id`.
       const existing =
         (await Tender.findOne({ tenderId: tenderKey })) ||
         (item.source === TENDER_ASIA_SOURCE
@@ -176,7 +205,13 @@ const analyzeTenders = async () => {
           : null);
       if (existing) continue;
 
-      const promptContent = `Source: ${item.source}
+      console.log(`\n======================================================`);
+      console.log(`[Stage 1] Analyzing tender: ${item.source} ${item.id} - ${item.name}`);
+
+      // ==========================================
+      // STAGE 1: Fast JSON Metadata Analysis
+      // ==========================================
+      const promptContentStage1 = `Source: ${item.source}
 Lot:
 Name: ${item.name}
 Description:
@@ -190,43 +225,137 @@ Display/ID: ${
         item.source === UZEX_SOURCE ? item.displayNo || "" : item.id || ""
       }`;
 
-      console.log(`Analyzing tender: ${item.source} ${item.id} - ${item.name}`);
-
-      const completion = await openai.chat.completions.create({
+      const completionStage1 = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: promptContent },
+          { role: "system", content: STAGE1_SYSTEM_PROMPT },
+          { role: "user", content: promptContentStage1 },
         ],
         response_format: { type: "json_object" },
       });
 
-      const replyText = completion.choices[0].message.content;
-      let analysis;
+      const replyTextStage1 = completionStage1.choices[0].message.content;
+      let jsonAnalysis;
       try {
-        analysis = JSON.parse(replyText);
+        jsonAnalysis = JSON.parse(replyTextStage1);
       } catch (e) {
-        console.error("Failed to parse OpenAI response:", replyText);
+        console.error("Failed to parse OpenAI Stage 1 response:", replyTextStage1);
         continue;
       }
 
-      const isMatched = analysis.result === "MATCH";
-      analysis.isMatched = isMatched; // keep for any future uses
+      const jsonMatched = jsonAnalysis.result === "MATCH";
+      jsonAnalysis.jsonMatched = jsonMatched;
 
-      await notifyGroup(item, analysis, isMatched);
+      console.log(`[Stage 1 Result] jsonMatched: ${jsonMatched}, Category: ${jsonAnalysis.category}, Reason: ${jsonAnalysis.reason}`);
+
+      // If Stage 1 did NOT match: reject immediately without downloading files
+      if (!jsonMatched) {
+        await notifyGroup(item, jsonAnalysis, false, null);
+
+        await Tender.create({
+          tenderId: tenderKey,
+          source: item.source,
+          title: item.name,
+          jsonMatched: false,
+          isMatched: false,
+          jsonAnalysis,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      // ==========================================
+      // STAGE 2: Deep File Download & Presale Analysis
+      // ==========================================
+      console.log(`[Stage 2] Starting deep TZ analysis for matched lot: ${item.id}`);
+
+      let filesInfo = [];
+      let parsedDocs = { combinedText: "", parsedFiles: [], hasReadableText: false };
+
+      try {
+        const candidateFiles = await getLotFiles(item);
+        filesInfo = candidateFiles;
+        console.log(`[Stage 2] Found ${candidateFiles.length} candidate files`);
+
+        if (candidateFiles.length > 0) {
+          const downloadedFiles = await downloadFilesList(candidateFiles);
+          console.log(`[Stage 2] Successfully downloaded ${downloadedFiles.length} files`);
+
+          parsedDocs = await parseDocuments(downloadedFiles);
+          console.log(`[Stage 2] Document parsing result: hasReadableText=${parsedDocs.hasReadableText}, files count=${parsedDocs.parsedFiles.length}`);
+        }
+      } catch (fileErr) {
+        console.error(`[Stage 2] Error during file extraction/download:`, fileErr.message);
+      }
+
+      let finalIsMatched = true;
+      let stage2Result = null;
+
+      if (parsedDocs.hasReadableText) {
+        // We have readable text from technical documents -> Run Stage 2 Presale Prompt
+        const promptContentStage2 = `ЛОТ:
+Название: ${item.name}
+Заказчик: ${item.company || "Не указан"}
+Регион: ${item.region || "Не указан"}
+Бюджет / Сумма: ${item.price ? `${item.price} ${item.currency || "UZS"}` : "Не указана"}
+Ссылка: ${item.url || `https://etender.uzex.uz/lot/${item.id}`}
+
+=== ТЕХНИЧЕСКОЕ ЗАДАНИЕ / ДОКУМЕНТАЦИЯ ИЗ ФАЙЛОВ ===
+${parsedDocs.combinedText}
+====================================================`;
+
+        console.log(`[Stage 2] Sending extracted TZ (${parsedDocs.combinedText.length} chars) to OpenAI Presale Model...`);
+
+        const completionStage2 = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: STAGE2_PRESALE_SYSTEM_PROMPT },
+            { role: "user", content: promptContentStage2 },
+          ],
+        });
+
+        const replyTextStage2 = completionStage2.choices[0].message.content;
+        stage2Result = parseStage2Analysis(replyTextStage2);
+        finalIsMatched = stage2Result.isMatched;
+
+        console.log(`[Stage 2 Presale Result] Status: ${stage2Result.status}, Score: ${stage2Result.score}, Decision: ${stage2Result.decision}, final isMatched: ${finalIsMatched}`);
+      } else {
+        // Files were non-text (drawings, video, images) or no files attached -> Fallback to Stage 1 match
+        finalIsMatched = true; // since jsonMatched was true
+        stage2Result = {
+          status: "🟢 To'g'ri keladi (JSON metama'lumotlari bo'yicha)",
+          isMatched: true,
+          score: null,
+          decision: "Изучить подробнее",
+          note: "Fayllarda o'qiladigan matn topilmadi yoki faqat rasm/media biriktirilgan. Qaror JSON tahlili asosida qabul qilindi.",
+          rawText: null,
+        };
+        console.log(`[Stage 2 Fallback] No readable TZ text found. Using Stage 1 match (isMatched=true).`);
+      }
+
+      // Notify Telegram & Save to MongoDB
+      await notifyGroup(item, jsonAnalysis, finalIsMatched, stage2Result);
 
       await Tender.create({
         tenderId: tenderKey,
         source: item.source,
         title: item.name,
-        isMatched,
+        jsonMatched: true,
+        isMatched: finalIsMatched,
+        jsonAnalysis,
+        deepAnalysis: stage2Result,
+        deepAnalysisRaw: stage2Result?.rawText || null,
+        statusTz: stage2Result?.status || null,
+        score: stage2Result?.score || null,
+        filesInfo: parsedDocs.parsedFiles,
       });
 
       // Small delay to avoid OpenAI rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   } catch (err) {
-    console.error("Error analyzing tenders:", err.message);
+    console.error("Error in analyzeTenders pipeline:", err.message);
   }
 };
 
@@ -248,7 +377,10 @@ const sendTelegramMessage = async (bot, chatId, message, options = {}) => {
   }
 };
 
-const notifyGroup = async (item, analysis, isMatched) => {
+/**
+ * Sends formatted notifications to Telegram groups/topics
+ */
+const notifyGroup = async (item, jsonAnalysis, isMatched, deepAnalysis = null) => {
   const groupId = isMatched
     ? process.env.GROUP_ID_MATCH
     : process.env.GROUP_ID_NOT_MATCH;
@@ -264,18 +396,6 @@ const notifyGroup = async (item, analysis, isMatched) => {
     : "Noma'lum";
   const currency = item.currency || "UZS";
 
-  let lotDetails = "";
-  if (item.lots && item.lots.length > 0) {
-    lotDetails =
-      "\n📦 Lotlar hajmi va narxi:\n" +
-      item.lots
-        .map(
-          (lot) =>
-            `- ${escapeHtml(lot.name)}: ${new Intl.NumberFormat("uz-UZ").format(lot.price)} ${escapeHtml(lot.currency || "UZS")}`
-        )
-        .join("\n");
-  }
-
   const sourceLabel =
     item.source === UZEX_SOURCE ? "UzEx" : "Tender Asia";
   const tenderLink =
@@ -284,38 +404,80 @@ const notifyGroup = async (item, analysis, isMatched) => {
       ? `https://etender.uzex.uz/lot/${item.id}`
       : "Noma'lum");
 
-  const categoryLine = analysis.category ? `📁 Kategoriya: <b>${escapeHtml(analysis.category)}</b>\n` : "";
-
+  const categoryLine = jsonAnalysis?.category ? `📁 Kategoriya: <b>${escapeHtml(jsonAnalysis.category)}</b>\n` : "";
   const itemName = escapeHtml(item.name || "Noma'lum");
   const compName = escapeHtml(item.company || "Noma'lum");
   const regionName = escapeHtml(item.region || "Noma'lum");
-  const reasonText = escapeHtml((analysis.reason || "").trim());
+  const reasonText = escapeHtml((jsonAnalysis?.reason || "").trim());
 
-  const message = isMatched
-    ? `<blockquote>${itemName}</blockquote>\n\n` +
+  let message = "";
+
+  if (isMatched) {
+    let statusHeader = "";
+    if (deepAnalysis) {
+      const statusBadge = deepAnalysis.status || "🟢 To'g'ri keladi";
+      const scoreBadge = deepAnalysis.score ? ` | 🏆 Bahosi: <b>${deepAnalysis.score}/100</b>` : "";
+      const decisionBadge = deepAnalysis.decision ? ` | 📌 <b>${escapeHtml(deepAnalysis.decision)}</b>` : "";
+      statusHeader = `${statusBadge}${scoreBadge}${decisionBadge}\n\n`;
+    }
+
+    let accordionDetails = "";
+    if (deepAnalysis && deepAnalysis.rawText) {
+      const recMatch = deepAnalysis.rawText.match(/(?:13\.\s*)?(ФИНАЛЬНАЯ\s*РЕКОМЕНДАЦИЯ[\s\S]*)$/i);
+      const descMatch = deepAnalysis.rawText.match(/(?:1\.\s*)?КРАТКОЕ\s*ОПИСАНИЕ\s*ЛОТА\s*([\s\S]*?)(?=(?:2\.\s*)?НАСКОЛЬКО|$)/i);
+
+      let descText = descMatch && descMatch[1] ? descMatch[1].trim() : "";
+      let recText = recMatch && recMatch[1] ? recMatch[1].trim() : (recMatch ? recMatch[0].trim() : "");
+      recText = recText.replace(/^13\.\s*/i, "").trim();
+
+      const innerParts = [];
+      if (descText) {
+        innerParts.push(`📋 <b>Tavsif:</b>\n${escapeHtml(descText)}`);
+      }
+      if (recText) {
+        innerParts.push(`💡 <b>Xulosa:</b>\n${escapeHtml(recText)}`);
+      }
+
+      if (innerParts.length > 0) {
+        accordionDetails = `<blockquote expandable>${innerParts.join("\n\n")}</blockquote>\n\n`;
+      }
+    } else if (deepAnalysis && deepAnalysis.note) {
+      accordionDetails = `<blockquote expandable>ℹ️ <i>${escapeHtml(deepAnalysis.note)}</i></blockquote>\n\n`;
+    }
+
+    message =
+      `<blockquote>${itemName}</blockquote>\n\n` +
       categoryLine +
       `🏢 Tashkilot: ${compName}\n` +
       `📍 Hudud: ${regionName}\n` +
-      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n` +
-      `${lotDetails}\n\n` +
-      `🔍 Xulosasi: ${reasonText}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n\n` +
-      `🧾 Manba: ${escapeHtml(sourceLabel)}`
-    : `❌\n\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
+      statusHeader +
+      accordionDetails +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>`;
+  } else {
+    // NOT MATCHED
+    message =
+      `❌\n\n` +
       `<blockquote>${itemName}</blockquote>\n\n` +
-      `${reasonText}\n\n` +
-      `💰 ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
-      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>\n\n` +
-      `🧾 Manba: ${escapeHtml(sourceLabel)}`;
+      `<blockquote expandable>` +
+      `${reasonText}` +
+      `</blockquote>\n\n` +
+      `🏢 Tashkilot: ${compName}\n` +
+      `📍 Hudud: ${regionName}\n` +
+      `🧾 Manba: ${escapeHtml(sourceLabel)}\n` +
+      `💰 Umumiy narx: ${escapeHtml(price)} ${escapeHtml(currency)}\n\n` +
+      `🔗 Tender havolasi: <a href="${tenderLink}">${escapeHtml(tenderLink)}</a>`;
+  }
 
-  // 1) Oddiy guruhga jo'natish (GROUP_ID_MATCH yoki GROUP_ID_NOT_MATCH)
+  // 1) Send to main group
   const baseOptions = {
     disable_web_page_preview: true,
     parse_mode: 'HTML',
   };
   await sendTelegramMessage(bot, groupId, message, baseOptions);
 
-  // 2) Topic guruhiga jo'natish (GROUP_ID_TOPICS, tegishli topicga)
+  // 2) Send to topics group if configured
   const topicsGroupId = process.env.GROUP_ID_TOPICS;
   const topicId = isMatched
     ? process.env.TOPIC_ID_MATCH
@@ -329,4 +491,8 @@ const notifyGroup = async (item, analysis, isMatched) => {
   }
 };
 
-module.exports = { analyzeTenders };
+module.exports = {
+  analyzeTenders,
+  parseStage2Analysis,
+  notifyGroup,
+};

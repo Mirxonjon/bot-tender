@@ -13,9 +13,32 @@ const tenderSchema = new mongoose.Schema({
     title: {
         type: String
     },
+    jsonMatched: {
+        type: Boolean,
+        default: false
+    },
     isMatched: {
         type: Boolean,
         default: false
+    },
+    jsonAnalysis: {
+        type: Object
+    },
+    deepAnalysis: {
+        type: Object
+    },
+    deepAnalysisRaw: {
+        type: String
+    },
+    statusTz: {
+        type: String
+    },
+    score: {
+        type: Number
+    },
+    filesInfo: {
+        type: Array,
+        default: []
     },
     processedAt: {
         type: Date,
